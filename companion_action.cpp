@@ -276,7 +276,7 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 			*/
 			for (std::pair<const LPENTITY, int> it : map_view)
 			{
-				dwHarmLevel = 1;
+				dwHarmLevel = 0;
 				const LPCHARACTER& lpc_entity = (LPCHARACTER)it.first;
 				fV1 = DISTANCE_APPROX(lpc_bot->GetX() - lpc_entity->GetX(), lpc_bot->GetY() - lpc_entity->GetY());
 				if (fV1 <= 300)
