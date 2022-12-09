@@ -235,29 +235,35 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 		if (!lpc_target || lpc_target->IsDead())
 		{
 			m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_IDLE;
+			m_bot->second.target_attack.dwVID = 0;
+			m_bot->second.target_attack.dwStartTime = 0;
 			return true;
 		}
 
 		fV1 = DISTANCE_APPROX(lpc_bot->GetX() - lpc_target->GetX(), lpc_bot->GetY() - lpc_target->GetY());
 
-		if (fV1 <= 300.f)
+		if (fV1 <= 170.f)
 		{
-				
-			lpc_bot->SetRotationToXY(lpc_target->GetX(), lpc_target->GetY());
-
-			if (lpc_bot->Attack(lpc_target, BATTLE_TYPE_MELEE))
+			if (!Attack(lpc_bot, lpc_target))
 			{
-				lpc_bot->SetStateDuration(PASSES_PER_SEC(2));
+				m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_IDLE;
+				m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_IDLE;
+				lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Attack END2: %d", m_bot->second.companion_config.dwStateBehavior);
+				return UpdateCompanionStateMovement(time, m_bot);
 			}
-
-			m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_IDLE;
-
-			lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Attack END1: %d", m_bot->second.companion_config.dwStateBehavior);
-			return true;
+			else
+			{
+				m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_IDLE;
+				//m_bot->second.dwTarget = lpc_target->GetVID();
+				lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Attack END1: %d", m_bot->second.companion_config.dwStateBehavior);
+				return true;
+			}
+			
+			
 		}
-		m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_IDLE;
-		m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_FOLLOW;
-		m_bot->second.dwTarget = lpc_target->GetVID();
+		m_bot->second.companion_config.dwStateCombat	= COMPANION_STATE_COMBAT_IDLE;
+		m_bot->second.companion_config.dwStateMovement	= COMPANION_STATE_MOVEMENT_FOLLOW;
+		//m_bot->second.dwTarget = lpc_target->GetVID();
 		return UpdateCompanionStateMovement(time, m_bot);
 	}
 	
@@ -269,7 +275,12 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 		switch (m_bot->second.companion_config.dwStateBehavior)
 		{
 		case COMPANION_STATE_BEHAVIOR_DEFENSIVE:
-			
+			if (m_bot->second.target_attack.dwVID > 0)
+			{
+				m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_ATTACK;
+				m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_IDLE;
+				return true;
+			}
 			/*
 				New Logic:
 					We iterate the owners view, and build a list of targets with priority
@@ -278,24 +289,24 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 			{
 				dwHarmLevel = 0;
 				const LPCHARACTER& lpc_entity = (LPCHARACTER)it.first;
-				fV1 = DISTANCE_APPROX(lpc_bot->GetX() - lpc_entity->GetX(), lpc_bot->GetY() - lpc_entity->GetY());
-				if (fV1 <= 300)
-				{
-					dwHarmLevel++;
-				} 
+				fV1 = (DWORD)DISTANCE_APPROX(lpc_owner->GetX() - lpc_entity->GetX(), lpc_owner->GetY() - lpc_entity->GetY());
+				dwHarmLevel += (DWORD)10 / (fV1 / 100);
+				//if (fV1 <= 600)
+				//{
+				//	dwHarmLevel = fV1;
+				//} 
+				//
+				//if (lpc_entity->GetTarget() == lpc_owner)
+				//{
+				//	dwHarmLevel++;
+				//}
 
-				if (lpc_entity->GetTarget() == lpc_owner)
-				{
-					dwHarmLevel++;
-				}
-
-				if (dwHarmLevel > 1)
+				if (dwHarmLevel > 0 && dwHarmLevel <= 2000)
 				{
 					map_target.insert(std::pair<DWORD, DWORD>((DWORD)lpc_entity->GetVID(), dwHarmLevel));
 					continue;
 				}
 			}
-			m_bot->second.dwTarget = 0;
 			if (map_target.size() > 0)
 			{
 				for (std::pair<const DWORD, DWORD> it : map_target)
@@ -306,7 +317,10 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 				if (map_target_sorted.size() > 0)
 				{
 					m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_FOLLOW;
-					m_bot->second.dwTarget = map_target_sorted.begin()->second;
+					//m_bot->second.dwTarget = map_target_sorted.begin()->second;
+
+					m_bot->second.target_attack.dwVID = map_target_sorted.begin()->second;
+					m_bot->second.target_attack.dwStartTime = get_dword_time();
 				}
 			}
 
@@ -314,21 +328,21 @@ bool CBotManager::UpdateCompanionStateCombat(DWORD time, std::map<DWORD, CBot>::
 			{
 				const LPCHARACTER& lpc_entity = CHARACTER_MANAGER::Instance().Find(m_bot->second.dwTarget);
 				
-				m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_IDLE;
-				m_bot->second.companion_config.dwStateCombat = COMPANION_STATE_COMBAT_ATTACK;
+				m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_FOLLOW;
+				m_bot->second.companion_config.dwStateCombat	= COMPANION_STATE_COMBAT_ATTACK;
 
 				lpc_bot->SetRotationToXY(lpc_entity->GetX(), lpc_entity->GetY());
 
 				lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Idle END1: %d", m_bot->second.companion_config.dwStateBehavior);
 				return UpdateCompanionStateMovement(time, m_bot);
 			}
-			else
-			{
-				m_bot->second.companion_config.dwStateMovement 		= COMPANION_STATE_MOVEMENT_FOLLOW;
-				m_bot->second.dwTarget = lpc_owner->GetVID();
 
-				lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Idle ENDx: %d", m_bot->second.companion_config.dwStateBehavior);
-			}
+			// Reset to owner
+			m_bot->second.companion_config.dwStateMovement = COMPANION_STATE_MOVEMENT_FOLLOW;
+			m_bot->second.dwTarget = lpc_owner->GetVID();
+
+			lpc_owner->ChatPacket(CHAT_TYPE_INFO, "Behaivour Defensive, Combat State: Idle ENDx: %d", m_bot->second.companion_config.dwStateBehavior);
+			
 			return UpdateCompanionStateMovement(time, m_bot);
 
 		case COMPANION_STATE_BEHAVIOR_IDLE:
